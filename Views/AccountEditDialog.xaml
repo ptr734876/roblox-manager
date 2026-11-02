@@ -1,0 +1,60 @@
+<Window x:Class="RobloxAccountManager.Views.AccountEditDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройки аккаунта" Height="380" Width="460"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#12131A">
+    <Border Padding="20">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock x:Name="DialogTitleText" Text="Редактирование аккаунта"
+                       Foreground="#F8FAFC" FontSize="18" FontWeight="Bold" Margin="0,0,0,16"/>
+
+            <StackPanel Grid.Row="1">
+                <!-- Поле куки (показывается при добавлении по куке или обновлении) -->
+                <StackPanel x:Name="CookiePanel" Margin="0,0,0,14">
+                    <TextBlock Text="Токен .ROBLOSECURITY (необязательно менять, если уже сохранен):"
+                               Foreground="#94A3B8" FontSize="12" Margin="0,0,0,6"/>
+                    <TextBox x:Name="CookieTextBox"
+                             Background="#1E2030" Foreground="#F1F5F9" BorderBrush="#2E324A"
+                             Padding="10,8" FontSize="12"/>
+                </StackPanel>
+
+                <!-- Группа -->
+                <TextBlock Text="Группа аккаунта (например: Основные, Фарм, Твинки):"
+                           Foreground="#94A3B8" FontSize="12" Margin="0,0,0,6"/>
+                <ComboBox x:Name="GroupComboBox" IsEditable="True"
+                          Background="#1E2030" Foreground="#1E2030"
+                          Padding="8,6" FontSize="13" Margin="0,0,0,14">
+                    <ComboBoxItem Content="Основные"/>
+                    <ComboBoxItem Content="Фарм"/>
+                    <ComboBoxItem Content="Твинки"/>
+                    <ComboBoxItem Content="Трейд"/>
+                    <ComboBoxItem Content="Хранилище"/>
+                </ComboBox>
+
+                <!-- Заметка -->
+                <TextBlock Text="Заметка к аккаунту (описание, уровень, предметы):"
+                           Foreground="#94A3B8" FontSize="12" Margin="0,0,0,6"/>
+                <TextBox x:Name="NoteTextBox"
+                         Background="#1E2030" Foreground="#F1F5F9" BorderBrush="#2E324A"
+                         Padding="10,8" FontSize="13" AcceptsReturn="False"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                <Button Content="Отмена" Click="CancelBtn_Click"
+                        Background="#2A2D3E" Foreground="#CBD5E1" BorderThickness="0"
+                        Padding="16,8" Margin="0,0,10,0" Cursor="Hand"/>
+                <Button x:Name="SaveBtn" Content="Сохранить" Click="SaveBtn_Click"
+                        Background="#3B82F6" Foreground="White" BorderThickness="0"
+                        Padding="18,8" FontWeight="SemiBold" Cursor="Hand"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

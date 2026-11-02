@@ -1,0 +1,38 @@
+<Window x:Class="RobloxAccountManager.Views.SavedPlaceNameDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Добавить избранное" Width="440" MinHeight="190"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Background="#12131A">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Название избранного"
+                   Foreground="#F8FAFC" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
+        <TextBlock Grid.Row="1" Text="Придумайте короткое имя для игры или приватного сервера."
+                   Foreground="#94A3B8" FontSize="12" Margin="0,0,0,10"/>
+        <TextBox x:Name="PlaceNameTextBox" Grid.Row="2" Height="38"
+                 Background="#0B0D14" Foreground="#FFFFFF" BorderBrush="#60A5FA"
+                 BorderThickness="1.5" CaretBrush="#93C5FD"
+                 SelectionBrush="#2563EB" SelectionTextBrush="#FFFFFF"
+                 Padding="10,7" FontSize="15" FontWeight="SemiBold"
+                 VerticalContentAlignment="Center" FocusVisualStyle="{x:Null}"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="Отмена" Click="CancelBtn_Click"
+                    Background="#2A2D3E" Foreground="#CBD5E1" BorderThickness="0"
+                    Padding="16,8" Margin="0,0,10,0" Cursor="Hand"/>
+            <Button Content="Сохранить" Click="SaveBtn_Click"
+                    Background="#3B82F6" Foreground="White" BorderThickness="0"
+                    Padding="18,8" FontWeight="SemiBold" Cursor="Hand"/>
+        </StackPanel>
+      </Grid>
+    </ScrollViewer>
+</Window>

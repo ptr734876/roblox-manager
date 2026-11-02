@@ -1,0 +1,40 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+publish/
+artifacts/
+dist/
+
+# Visual Studio / .NET / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+project.lock.json
+project.fragment.lock.json
+
+# Personal data, cookies, sessions & configs (NEVER COMMIT)
+accounts_data.json
+*accounts_data*.json
+RobloxCookies.dat
+*RobloxCookies*.dat
+*.cookie
+*.cookies
+*ROBLOSECURITY*
+WebView2_Session/
+EBWebView/
+*.dat
