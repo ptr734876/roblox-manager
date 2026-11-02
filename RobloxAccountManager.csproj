@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyTitle>Roblox Account Manager</AssemblyTitle>
     <Product>Roblox Account Manager</Product>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 

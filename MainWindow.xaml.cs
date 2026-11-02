@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -56,6 +56,20 @@ namespace RobloxAccountManager
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             _config = _storageService.Load();
+            foreach (var acc in _config.Accounts)
+            {
+                if (acc.StatusText == "В игре" ||
+                    acc.StatusText == "В игре (окно открыто)" ||
+                    acc.StatusText == "Сессия активна" ||
+                    acc.StatusText.StartsWith("Клиент запущен", StringComparison.Ordinal) ||
+                    acc.StatusText.StartsWith("Запуск", StringComparison.Ordinal) ||
+                    acc.StatusText.StartsWith("В очереди", StringComparison.Ordinal) ||
+                    acc.StatusText.StartsWith("Ждем пред.", StringComparison.Ordinal))
+                {
+                    acc.StatusText = "Окно не открыто";
+                    acc.StatusColor = "#94A3B8";
+                }
+            }
 
             PlaceInputTextBox.Text = string.Empty;
             VipOrJobTextBox.Text = string.Empty;
@@ -409,7 +423,8 @@ namespace RobloxAccountManager
 
                     if (lastSingletonCheck.ElapsedMilliseconds >= 900)
                     {
-                        await Task.Run(() => _multiRobloxService.PrepareForNewInstanceLaunch());
+                        int? bootingPid = !launchProcessExited ? proc.Id : null;
+                        await Task.Run(() => _multiRobloxService.PrepareForNewInstanceLaunch(bootingPid));
                         lastSingletonCheck.Restart();
                     }
 
@@ -422,6 +437,7 @@ namespace RobloxAccountManager
                     }
 
                     freshLogCount = 0;
+                    bool detectedCrashInFreshLog = false;
                     if (Directory.Exists(logsDir))
                     {
                         var recentLogs = new DirectoryInfo(logsDir)
@@ -441,23 +457,29 @@ namespace RobloxAccountManager
                                 string text = await sr.ReadToEndAsync();
                                 freshLogCount++;
 
-
-
-                                // A launch can create a short-lived deeplink log before the real client log.
-                                // Inspect every fresh log instead of pinning readiness to the first one.
-                                if (text.Contains("userDidLogin", StringComparison.Ordinal) ||
+                                // Важно: НЕ считаем "ReadyForFlagFetch completed" признаком готового запуска!
+                                // Эта строка пишется на 0.7с ДО скачивания флагов и ДО чтения RobloxCookies.dat.
+                                // При включённом Zapret скачивание флагов может занять 15-35 сек, поэтому ждём реального чтения куки (LogWin32BTId) или создания окна.
+                                if (text.Contains("LogWin32BTId", StringComparison.Ordinal) ||
+                                    text.Contains("userDidLogin", StringComparison.Ordinal) ||
                                     text.Contains("RenderView created", StringComparison.Ordinal) ||
                                     text.Contains("Joining game", StringComparison.Ordinal) ||
-                                    text.Contains("Roblox stage ReadyForFlagFetch completed", StringComparison.Ordinal) ||
                                     text.Contains("Successfully launched new process in systray mode", StringComparison.Ordinal) ||
                                     text.Contains("SingleSurfaceApp", StringComparison.Ordinal) ||
                                     text.Contains("DUAR is on", StringComparison.Ordinal) ||
                                     text.Contains("Starting module: GlobalInstance", StringComparison.Ordinal))
                                 {
                                     clientStartupConfirmed = true;
-                                                                        account.StatusText = $"Клиент запущен ({memMb} МБ)";
+                                    _lastConfirmedLogPath = file.FullName;
+                                    account.StatusText = $"Клиент запущен ({memMb} МБ)";
                                     account.StatusColor = "#4CAF50";
                                     return true;
+                                }
+
+                                if (text.Contains("RBXCRASH:", StringComparison.Ordinal) ||
+                                    text.Contains("Failed to download or apply critical settings", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    detectedCrashInFreshLog = true;
                                 }
                             }
                             catch (IOException) { }
@@ -468,9 +490,24 @@ namespace RobloxAccountManager
                     if (memMb >= 90)
                     {
                         clientStartupConfirmed = true;
-                                                account.StatusText = $"Клиент запущен ({memMb} МБ)";
+                        account.StatusText = $"Клиент запущен ({memMb} МБ)";
                         account.StatusColor = "#4CAF50";
                         return true;
+                    }
+
+                    // Если стартовый процесс упал на этапе FlagFetching (например из-за desync-пакета Zapret),
+                    // и при этом дочерний процесс для этого browserTrackerId не запущен — сразу выходим для авто-повтора
+                    if (launchProcessExited && (detectedCrashInFreshLog || sw.Elapsed.TotalSeconds > 6.0))
+                    {
+                        int? aliveChildPid = FindProcessId(browserTrackerId, proc.Id);
+                        if (aliveChildPid == null || !IsProcessAlive(aliveChildPid))
+                        {
+                            account.StatusText = detectedCrashInFreshLog
+                                ? "Сбой старта клиента (RBXCRASH), повтор..."
+                                : "Процесс Roblox завершился до открытия окна";
+                            account.StatusColor = "#FBBF24";
+                            return false;
+                        }
                     }
 
                     string stage = freshLogCount > 0
@@ -570,48 +607,83 @@ namespace RobloxAccountManager
                 string launchPlaceInput = placeInputOverride ?? PlaceInputTextBox.Text;
                 string launchTargetInput = targetInputOverride ?? VipOrJobTextBox.Text;
                 HashSet<int> pidsBeforeLaunch = GetRobloxPids();
-                _lastConfirmedLogPath = null;
 
-                var (success, message, startedProc, cleanCookie, trackerId) =
-                    await _apiService.LaunchAccountAsync(account, launchPlaceInput, launchTargetInput);
-
-                account.StatusText = message;
-                account.StatusColor = success ? "#FBBF24" : "#EF4444";
-                FooterStatusText.Text = $"@{account.Username}: {message}";
-                SaveCurrentConfig();
-
-                if (!success)
+                for (int launchAttempt = 1; launchAttempt <= 2; launchAttempt++)
                 {
-                    return false;
+                    _lastConfirmedLogPath = null;
+                    DateTime attemptUtc = DateTime.UtcNow;
+                    HashSet<string> attemptExistingLogs;
+                    try
+                    {
+                        attemptExistingLogs = GetCurrentRobloxLogPaths();
+                    }
+                    catch
+                    {
+                        attemptExistingLogs = existingLogPaths;
+                    }
+
+                    if (launchAttempt > 1)
+                    {
+                        account.StatusText = $"Повторный запуск клиента (попытка {launchAttempt})...";
+                        account.StatusColor = "#FBBF24";
+                        FooterStatusText.Text = $"@{account.Username}: повторный старт клиента Roblox...";
+                        await Task.Run(() => _multiRobloxService.PrepareForNewInstanceLaunch());
+                        await Task.Delay(1500);
+                    }
+
+                    var (success, message, startedProc, cleanCookie, trackerId) =
+                        await _apiService.LaunchAccountAsync(account, launchPlaceInput, launchTargetInput);
+
+                    account.StatusText = message;
+                    account.StatusColor = success ? "#FBBF24" : "#EF4444";
+                    FooterStatusText.Text = $"@{account.Username}: {message}";
+                    SaveCurrentConfig();
+
+                    if (!success)
+                    {
+                        return false;
+                    }
+
+                    if (startedProc == null)
+                    {
+                        account.StatusText = "Запуск не подтверждён: процесс не отслеживается";
+                        account.StatusColor = "#EF4444";
+                        FooterStatusText.Text = $"@{account.Username}: {account.StatusText}";
+                        return false;
+                    }
+
+                    _activeBootingProcess = startedProc;
+                    _lastLaunchTime = DateTime.Now;
+
+                    bool ready = await WaitUntilInstanceReadyAsync(
+                        account,
+                        startedProc,
+                        cleanCookie,
+                        trackerId,
+                        attemptUtc,
+                        attemptExistingLogs,
+                        nextAccountUsername);
+
+                    if (ready)
+                    {
+                        await RegisterSessionAsync(account, trackerId, startedProc, launchPlaceInput, launchTargetInput, pidsBeforeLaunch, attemptExistingLogs, attemptUtc);
+                        FooterStatusText.Text = $"@{account.Username}: запуск подтверждён.{FormatSettingsNotice(_lastRobloxSettingsNotice)}";
+                        return true;
+                    }
+
+                    // Если клиент упал на старте (RBXCRASH или ранний выход процесса), пробуем ещё раз автоматически
+                    if (launchAttempt < 2 &&
+                        (account.StatusText.Contains("RBXCRASH", StringComparison.OrdinalIgnoreCase) ||
+                         account.StatusText.Contains("завершился до открытия", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    break;
                 }
 
-                if (startedProc == null)
-                {
-                    account.StatusText = "Запуск не подтверждён: процесс не отслеживается";
-                    account.StatusColor = "#EF4444";
-                    FooterStatusText.Text = $"@{account.Username}: {account.StatusText}";
-                    return false;
-                }
-
-                _activeBootingProcess = startedProc;
-                _lastLaunchTime = DateTime.Now;
-
-                bool ready = await WaitUntilInstanceReadyAsync(
-                    account,
-                    startedProc,
-                    cleanCookie,
-                    trackerId,
-                    launchUtc,
-                    existingLogPaths,
-                    nextAccountUsername);
-                if (ready)
-                {
-                    await RegisterSessionAsync(account, trackerId, startedProc, launchPlaceInput, launchTargetInput, pidsBeforeLaunch, existingLogPaths, launchUtc);
-                }
-                FooterStatusText.Text = ready
-                    ? $"@{account.Username}: запуск подтверждён.{FormatSettingsNotice(_lastRobloxSettingsNotice)}"
-                    : $"@{account.Username}: {account.StatusText}{FormatSettingsNotice(_lastRobloxSettingsNotice)}";
-                return ready;
+                FooterStatusText.Text = $"@{account.Username}: {account.StatusText}{FormatSettingsNotice(_lastRobloxSettingsNotice)}";
+                return false;
             }
             finally
             {
@@ -784,26 +856,25 @@ namespace RobloxAccountManager
                 }
 
                 // 1. Ищем процесс с явным browsertrackerid в командной строке
-                string trackerStr = $"browsertrackerid:{trackerId}";
-                var direct = list.FirstOrDefault(x => x.cmd.Contains(trackerStr, StringComparison.OrdinalIgnoreCase));
-                if (direct.pid != 0)
+                if (trackerId > 0)
                 {
-                    // Если у него есть дочерний процесс (systray-режим), то дочерний процесс и есть активное игровое окно!
-                    var child = list.FirstOrDefault(x => x.ppid == direct.pid);
-                    return child.pid != 0 ? child.pid : direct.pid;
+                    string trackerStr = $"browsertrackerid:{trackerId}";
+                    var direct = list.FirstOrDefault(x => x.cmd.Contains(trackerStr, StringComparison.OrdinalIgnoreCase));
+                    if (direct.pid != 0)
+                    {
+                        // Если у него есть дочерний процесс (systray-режим), то дочерний процесс и есть активное игровое окно!
+                        var child = list.FirstOrDefault(x => x.ppid == direct.pid);
+                        return child.pid != 0 ? child.pid : direct.pid;
+                    }
                 }
 
-                // 2. Если исходный PID известен, ищем его дочерний процесс
+                // 2. Если исходный PID известен, проверяем сам процесс или его дочерний процесс
                 if (initialPid.HasValue)
                 {
                     var child = list.FirstOrDefault(x => x.ppid == initialPid.Value);
                     if (child.pid != 0) return child.pid;
-                }
-
-                // 3. Если запущен только один RobloxPlayerBeta, возвращаем его
-                if (list.Count == 1)
-                {
-                    return list[0].pid;
+                    var self = list.FirstOrDefault(x => x.pid == initialPid.Value);
+                    if (self.pid != 0) return self.pid;
                 }
             }
             catch { }
@@ -882,6 +953,19 @@ namespace RobloxAccountManager
         {
             try
             {
+                // 0. Сначала очищаем устаревшие сессии, у которых процесс уже закрыт
+                foreach (var oldSession in _sessions.ToList())
+                {
+                    if (!IsProcessAlive(oldSession.Pid))
+                    {
+                        oldSession.Pid = FindProcessId(oldSession.BrowserTrackerId, oldSession.InitialPid);
+                        if (!IsProcessAlive(oldSession.Pid) && (DateTime.UtcNow - oldSession.LaunchTime).TotalSeconds > 20.0)
+                        {
+                            _sessions.Remove(oldSession);
+                        }
+                    }
+                }
+
                 string logsDir = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Roblox", "logs");
                 if (!Directory.Exists(logsDir)) return;
@@ -919,7 +1003,7 @@ namespace RobloxAccountManager
                                 (DateTime.UtcNow - f.LastWriteTimeUtc).TotalHours < 12.0 &&
                                 f.Length > 2048)
                     .OrderByDescending(f => f.LastWriteTimeUtc)
-                    .Take(Math.Max(runningProcs.Count + 4, 10))
+                    .Take(Math.Max(runningProcs.Count + 6, 12))
                     .ToList();
 
                 var parsedLogs = new List<(FileInfo File, long UserId, string? PlaceId, long BrowserTrackerId, DateTime CreatedUtc)>();
@@ -1019,8 +1103,6 @@ namespace RobloxAccountManager
                     .GroupBy(x => x.UserId)
                     .Select(g => g.OrderByDescending(x => x.File.LastWriteTimeUtc).First())
                     .OrderByDescending(x => x.File.LastWriteTimeUtc)
-                    .Take(runningProcs.Count)
-                    .OrderBy(x => x.CreatedUtc)
                     .ToList();
 
                 foreach (var entry in uniqueAccountLogs)
@@ -1032,7 +1114,9 @@ namespace RobloxAccountManager
                     int? matchedPid = FindProcessId(entry.BrowserTrackerId, null);
                     if (matchedPid == null || usedPids.Contains(matchedPid.Value))
                     {
-                        var availableProcs = runningProcs.Where(p => !usedPids.Contains(p.Pid)).ToList();
+                        var availableProcs = runningProcs
+                            .Where(p => !usedPids.Contains(p.Pid) && Math.Abs((p.StartUtc - entry.CreatedUtc).TotalSeconds) <= 120.0)
+                            .ToList();
                         if (availableProcs.Count > 0)
                         {
                             var closest = availableProcs
@@ -1040,12 +1124,19 @@ namespace RobloxAccountManager
                                 .First();
                             matchedPid = closest.Pid;
                         }
+                        else
+                        {
+                            matchedPid = null;
+                        }
                     }
 
-                    if (matchedPid.HasValue)
+                    // Если для этого лога не нашлось реального запущенного процесса — пропускаем (это лог уже закрытого окна!)
+                    if (!matchedPid.HasValue || !IsProcessAlive(matchedPid))
                     {
-                        usedPids.Add(matchedPid.Value);
+                        continue;
                     }
+
+                    usedPids.Add(matchedPid.Value);
                     usedLogs.Add(entry.File.FullName);
 
                     string effectivePlace = !string.IsNullOrWhiteSpace(PlaceInputTextBox.Text)
@@ -1269,15 +1360,10 @@ namespace RobloxAccountManager
 
                 foreach (TrackedSession session in _sessions.ToList())
                 {
-                    // 1. Поддерживаем актуальный PID игрового окна
+                    // 1. Поддерживаем актуальный PID игрового окна (строго по своему BrowserTrackerId / InitialPid, не воруя чужие PID!)
                     if (session.Pid == null || !IsProcessAlive(session.Pid))
                     {
                         session.Pid = FindProcessId(session.BrowserTrackerId, session.InitialPid);
-                        if (session.Pid == null)
-                        {
-                            var otherTrackedPids = _sessions.Where(s => s != session && s.Pid.HasValue).Select(s => s.Pid!.Value).ToHashSet();
-                            session.Pid = FindGameProcessId(otherTrackedPids);
-                        }
                     }
 
                     // 2. Проверяем, не появился ли более свежий активный лог этого сеанса
@@ -1394,6 +1480,7 @@ namespace RobloxAccountManager
                     // 4. Проверяем состояние активности окна
                     bool isAlive = session.Pid != null && IsProcessAlive(session.Pid);
                     bool anyRobloxRunning = totalRobloxProcs > 0;
+                    bool inStartupHandOff = (DateTime.UtcNow - session.LaunchTime).TotalSeconds < 25.0;
 
                     bool logActive = false;
                     if (session.LogPath != null && File.Exists(session.LogPath))
@@ -1401,12 +1488,12 @@ namespace RobloxAccountManager
                         try
                         {
                             var fi = new FileInfo(session.LogPath);
-                            logActive = (DateTime.UtcNow - fi.LastWriteTimeUtc).TotalSeconds < Math.Max(graceSeconds, 120.0);
+                            logActive = (DateTime.UtcNow - fi.LastWriteTimeUtc).TotalSeconds < 15.0;
                         }
                         catch { }
                     }
 
-                    if (isAlive || (anyRobloxRunning && (logActive || _sessions.Count == 1)) || inGracePeriod || isTeleportingNow)
+                    if (isAlive || (anyRobloxRunning && inStartupHandOff) || isTeleportingNow)
                     {
                         if (!session.DisconnectDetectedUtc.HasValue &&
                             session.Account.StatusText != "В игре" &&
@@ -1417,7 +1504,7 @@ namespace RobloxAccountManager
                             session.Account.StatusColor = "#4CAF50";
                         }
                     }
-                    else if (!anyRobloxRunning || (!isAlive && !logActive && (DateTime.UtcNow - session.LaunchTime).TotalSeconds > graceSeconds + 60.0))
+                    else if (!isAlive && !inStartupHandOff && !logActive)
                     {
                         _sessions.Remove(session);
                         session.Account.StatusText = "Окно закрыто";
@@ -1830,13 +1917,29 @@ namespace RobloxAccountManager
             }
         }
 
-        // Проверка валидности всех сохраненных сессий
+        // Проверка валидности всех сохраненных сессий и реального статуса открытых окон Roblox
         private async void RefreshAccounts_Click(object sender, RoutedEventArgs e)
         {
             if (_config.Accounts.Count == 0) return;
 
-            FooterStatusText.Text = "Проверка всех аккаунтов...";
+            FooterStatusText.Text = "Проверка всех аккаунтов и открытых окон...";
+
+            // 1. Актуализируем список живых окон Roblox
+            foreach (var s in _sessions.ToList())
+            {
+                if (!IsProcessAlive(s.Pid))
+                {
+                    s.Pid = FindProcessId(s.BrowserTrackerId, s.InitialPid);
+                    if (!IsProcessAlive(s.Pid))
+                    {
+                        _sessions.Remove(s);
+                    }
+                }
+            }
+            AttachToExistingRobloxSessions();
+
             int valid = 0;
+            int openWindowsCount = 0;
 
             foreach (var acc in _config.Accounts)
             {
@@ -1844,14 +1947,29 @@ namespace RobloxAccountManager
                 acc.StatusColor = "#94A3B8";
                 string cookie = AccountStorageService.DecryptCookie(acc.EncryptedCookie);
                 var info = await _apiService.ValidateAndGetUserAsync(cookie);
+
+                bool isWindowOpen = _sessions.Any(s => s.Account.UserId == acc.UserId && IsProcessAlive(s.Pid));
+                if (isWindowOpen)
+                {
+                    openWindowsCount++;
+                }
+
                 if (info != null)
                 {
                     acc.UserId = info.Id;
                     acc.Username = info.Name;
                     acc.DisplayName = info.DisplayName;
                     acc.AvatarUrl = info.AvatarUrl;
-                    acc.StatusText = "Сессия активна";
-                    acc.StatusColor = "#4CAF50";
+                    if (isWindowOpen)
+                    {
+                        acc.StatusText = "В игре (окно открыто)";
+                        acc.StatusColor = "#4CAF50";
+                    }
+                    else
+                    {
+                        acc.StatusText = "Окно не открыто (кука ОК)";
+                        acc.StatusColor = "#94A3B8";
+                    }
                     valid++;
                 }
                 else
@@ -1862,7 +1980,7 @@ namespace RobloxAccountManager
             }
 
             SaveCurrentConfig();
-            FooterStatusText.Text = $"Проверка завершена: активны {valid} из {_config.Accounts.Count}.";
+            FooterStatusText.Text = $"Проверка завершена: рабочих куки {valid}/{_config.Accounts.Count} • В игре (открыто окон): {openWindowsCount}.";
         }
 
         private void CloseAllRoblox_Click(object sender, RoutedEventArgs e)

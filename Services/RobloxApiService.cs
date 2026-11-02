@@ -54,7 +54,38 @@ namespace RobloxAccountManager.Services
             ConnectCallback = ConnectRobloxWithFallbackAsync
         };
 
+        private static readonly SocketsHttpHandler DirectFallbackHandler = new()
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+            EnableMultipleHttp2Connections = true,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            UseCookies = false,
+            ConnectCallback = ConnectRobloxDirectIpsOnlyAsync
+        };
+
         private static async ValueTask<Stream> ConnectRobloxWithFallbackAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+        {
+            // 1. Сначала всегда пробуем стандартное подключение через системный DNS (включая Cloudflare IP).
+            // Если у пользователя включен Zapret (winws) или VPN, стандартный маршрут работает мгновенно и штатно.
+            var defaultSocket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                using var sysCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                sysCts.CancelAfter(TimeSpan.FromSeconds(4.0));
+                await defaultSocket.ConnectAsync(context.DnsEndPoint, sysCts.Token);
+                return new NetworkStream(defaultSocket, ownsSocket: true);
+            }
+            catch
+            {
+                defaultSocket.Dispose();
+            }
+
+            // 2. Если стандартный коннект не прошел по таймауту, переходим на прямые IP Roblox (обход блокировки Cloudflare TCP)
+            return await ConnectRobloxDirectIpsOnlyAsync(context, cancellationToken);
+        }
+
+        private static async ValueTask<Stream> ConnectRobloxDirectIpsOnlyAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         {
             string host = context.DnsEndPoint.Host;
             int port = context.DnsEndPoint.Port;
@@ -67,7 +98,6 @@ namespace RobloxAccountManager.Services
                 foreach (IPAddress ip in resolved)
                 {
                     byte[] bytes = ip.GetAddressBytes();
-                    // Пропускаем Cloudflare IP (104.16.0.0/12 -> 104.16..104.31, 172.64.0.0/13), где блокируется TLS-рукопожатие
                     bool isCloudflareAnycast = (bytes[0] == 104 && bytes[1] >= 16 && bytes[1] <= 31) ||
                                                (bytes[0] == 172 && bytes[1] >= 64 && bytes[1] <= 71);
                     if (!isCloudflareAnycast && !candidateIps.Contains(ip))
@@ -78,7 +108,6 @@ namespace RobloxAccountManager.Services
             }
             catch { }
 
-            // Если домен roblox.com (например auth.roblox.com) сдал только Cloudflare IP, резолвим прямые IP через users.roblox.com / apis.roblox.com
             if (candidateIps.Count == 0 && host.EndsWith(".roblox.com", StringComparison.OrdinalIgnoreCase))
             {
                 foreach (string siblingHost in new[] { "users.roblox.com", "apis.roblox.com", "www.roblox.com" })
@@ -129,25 +158,33 @@ namespace RobloxAccountManager.Services
                 }
             }
 
-            // Резервный стандартный коннект, если это не roblox.com
-            var defaultSocket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-            try
-            {
-                await defaultSocket.ConnectAsync(context.DnsEndPoint, cancellationToken);
-                return new NetworkStream(defaultSocket, ownsSocket: true);
-            }
-            catch
-            {
-                defaultSocket.Dispose();
-                if (lastError != null) throw lastError;
-                throw;
-            }
+            if (lastError != null) throw lastError;
+            throw new SocketException((int)SocketError.HostUnreachable);
         }
 
         private static readonly HttpClient SharedClient = new(SharedHandler)
         {
-            Timeout = TimeSpan.FromSeconds(30)
+            Timeout = TimeSpan.FromSeconds(25)
         };
+
+        private static readonly HttpClient DirectFallbackClient = new(DirectFallbackHandler)
+        {
+            Timeout = TimeSpan.FromSeconds(25)
+        };
+
+        private static async Task<HttpResponseMessage> SendWithFallbackAsync(Func<HttpRequestMessage> requestFactory, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                using var req = requestFactory();
+                return await SharedClient.SendAsync(req, cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+            {
+                using var fallbackReq = requestFactory();
+                return await DirectFallbackClient.SendAsync(fallbackReq, cancellationToken);
+            }
+        }
 
         public static string CleanCookie(string rawCookie)
         {
@@ -186,12 +223,14 @@ namespace RobloxAccountManager.Services
         {
             try
             {
-                using var req = CreateRequest(HttpMethod.Get, "https://users.roblox.com/v1/users/authenticated", cookie);
-                var response = await SharedClient.SendAsync(req);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                using var response = await SendWithFallbackAsync(
+                    () => CreateRequest(HttpMethod.Get, "https://users.roblox.com/v1/users/authenticated", cookie),
+                    cts.Token);
                 if (!response.IsSuccessStatusCode)
                     return null;
 
-                string json = await response.Content.ReadAsStringAsync();
+                string json = await response.Content.ReadAsStringAsync(cts.Token);
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
@@ -220,12 +259,14 @@ namespace RobloxAccountManager.Services
             try
             {
                 string url = $"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={userId}&size=150x150&format=Png&isCircular=false";
-                using var req = CreateRequest(HttpMethod.Get, url);
-                var response = await SharedClient.SendAsync(req);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var response = await SendWithFallbackAsync(
+                    () => CreateRequest(HttpMethod.Get, url),
+                    cts.Token);
                 if (!response.IsSuccessStatusCode)
                     return string.Empty;
 
-                string json = await response.Content.ReadAsStringAsync();
+                string json = await response.Content.ReadAsStringAsync(cts.Token);
                 using var doc = JsonDocument.Parse(json);
                 var dataArr = doc.RootElement.GetProperty("data");
                 if (dataArr.GetArrayLength() > 0)
@@ -250,15 +291,18 @@ namespace RobloxAccountManager.Services
             {
                 try
                 {
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
                     string? csrf = _cachedCsrfToken;
 
-                    using var req1 = CreateRequest(HttpMethod.Post, "https://auth.roblox.com/v1/authentication-ticket", cookie, csrf);
-                    req1.Headers.Add("Referer", "https://www.roblox.com/");
-                    req1.Headers.Add("Origin", "https://www.roblox.com");
-                    req1.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+                    using var resp1 = await SendWithFallbackAsync(() =>
+                    {
+                        var r = CreateRequest(HttpMethod.Post, "https://auth.roblox.com/v1/authentication-ticket", cookie, csrf);
+                        r.Headers.Add("Referer", "https://www.roblox.com/");
+                        r.Headers.Add("Origin", "https://www.roblox.com");
+                        r.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+                        return r;
+                    }, cts.Token);
 
-                    using var resp1 = await SharedClient.SendAsync(req1, cts.Token);
                     if (resp1.IsSuccessStatusCode &&
                         resp1.Headers.TryGetValues("rbx-authentication-ticket", out var directTicketValues))
                     {
@@ -285,12 +329,15 @@ namespace RobloxAccountManager.Services
                             _cachedCsrfToken = newCsrf;
                             csrf = newCsrf;
 
-                            using var req2 = CreateRequest(HttpMethod.Post, "https://auth.roblox.com/v1/authentication-ticket", cookie, csrf);
-                            req2.Headers.Add("Referer", "https://www.roblox.com/");
-                            req2.Headers.Add("Origin", "https://www.roblox.com");
-                            req2.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+                            using var resp2 = await SendWithFallbackAsync(() =>
+                            {
+                                var r = CreateRequest(HttpMethod.Post, "https://auth.roblox.com/v1/authentication-ticket", cookie, csrf);
+                                r.Headers.Add("Referer", "https://www.roblox.com/");
+                                r.Headers.Add("Origin", "https://www.roblox.com");
+                                r.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+                                return r;
+                            }, cts.Token);
 
-                            using var resp2 = await SharedClient.SendAsync(req2, cts.Token);
                             if (resp2.IsSuccessStatusCode &&
                                 resp2.Headers.TryGetValues("rbx-authentication-ticket", out var ticketValues))
                             {
@@ -437,23 +484,29 @@ namespace RobloxAccountManager.Services
                     linkType
                 });
 
-                using var req1 = CreateRequest(HttpMethod.Post, "https://apis.roblox.com/sharelinks/v1/resolve-link", cookie);
-                req1.Headers.Add("Referer", "https://www.roblox.com/");
-                req1.Headers.Add("Origin", "https://www.roblox.com");
-                req1.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-
-                using var resp1 = await SharedClient.SendAsync(req1);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                using var resp1 = await SendWithFallbackAsync(() =>
+                {
+                    var r = CreateRequest(HttpMethod.Post, "https://apis.roblox.com/sharelinks/v1/resolve-link", cookie);
+                    r.Headers.Add("Referer", "https://www.roblox.com/");
+                    r.Headers.Add("Origin", "https://www.roblox.com");
+                    r.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+                    return r;
+                }, cts.Token);
                 HttpResponseMessage finalResp = resp1;
                 HttpResponseMessage? retryResponse = null;
 
                 if (!resp1.IsSuccessStatusCode && resp1.Headers.TryGetValues("x-csrf-token", out var csrfVals))
                 {
                     string csrf = csrfVals.FirstOrDefault() ?? "";
-                    using var req2 = CreateRequest(HttpMethod.Post, "https://apis.roblox.com/sharelinks/v1/resolve-link", cookie, csrf);
-                    req2.Headers.Add("Referer", "https://www.roblox.com/");
-                    req2.Headers.Add("Origin", "https://www.roblox.com");
-                    req2.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-                    retryResponse = await SharedClient.SendAsync(req2);
+                    retryResponse = await SendWithFallbackAsync(() =>
+                    {
+                        var r = CreateRequest(HttpMethod.Post, "https://apis.roblox.com/sharelinks/v1/resolve-link", cookie, csrf);
+                        r.Headers.Add("Referer", "https://www.roblox.com/");
+                        r.Headers.Add("Origin", "https://www.roblox.com");
+                        r.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+                        return r;
+                    }, cts.Token);
                     finalResp = retryResponse;
                 }
 
@@ -751,13 +804,16 @@ namespace RobloxAccountManager.Services
 
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
                 // Поиск по нику публичный, куку не передаём, чтобы не упираться в лимиты сессии
-                using var req = CreateRequest(HttpMethod.Post, "https://users.roblox.com/v1/usernames/users");
                 string body = JsonSerializer.Serialize(new { usernames = new[] { username }, excludeBannedUsers = true });
-                req.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
-                using var resp = await SharedClient.SendAsync(req, cts.Token);
+                using var resp = await SendWithFallbackAsync(() =>
+                {
+                    var r = CreateRequest(HttpMethod.Post, "https://users.roblox.com/v1/usernames/users");
+                    r.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    return r;
+                }, cts.Token);
                 if ((int)resp.StatusCode == 429)
                     return (null, null, "Roblox временно ограничил поиск по нику (HTTP 429). Повторите через несколько секунд.");
                 if (!resp.IsSuccessStatusCode)
@@ -778,7 +834,7 @@ namespace RobloxAccountManager.Services
             }
             catch (OperationCanceledException)
             {
-                return (null, null, $"Roblox не ответил за 5 сек при поиске ника @{username}. Проверьте соединение и повторите.");
+                return (null, null, $"Roblox не ответил за 8 сек при поиске ника @{username}. Проверьте соединение и повторите.");
             }
             catch (Exception ex)
             {
@@ -787,20 +843,23 @@ namespace RobloxAccountManager.Services
         }
 
         /// <summary>
-        /// Presence с точки зрения выбранного аккаунта. Быстрый опрос с таймаутом 3с.
+        /// Presence с точки зрения выбранного аккаунта. Быстрый опрос с таймаутом 6с.
         /// </summary>
         private static async Task<(int presenceType, long? placeId, string? gameId)> GetPresenceAsync(string cookie, long userId)
         {
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
                 string body = JsonSerializer.Serialize(new { userIds = new[] { userId } });
 
                 async Task<HttpResponseMessage> Send(string? csrf)
                 {
-                    var req = CreateRequest(HttpMethod.Post, "https://presence.roblox.com/v1/presence/users", cookie, csrf);
-                    req.Content = new StringContent(body, Encoding.UTF8, "application/json");
-                    return await SharedClient.SendAsync(req, cts.Token);
+                    return await SendWithFallbackAsync(() =>
+                    {
+                        var req = CreateRequest(HttpMethod.Post, "https://presence.roblox.com/v1/presence/users", cookie, csrf);
+                        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                        return req;
+                    }, cts.Token);
                 }
 
                 var resp = await Send(null);

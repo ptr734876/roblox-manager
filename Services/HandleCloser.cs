@@ -116,7 +116,7 @@ namespace RobloxAccountManager.Services
         /// Находит в процессах RobloxPlayerBeta хэндл типа Event с именем \Sessions\*\BaseNamedObjects\ROBLOX_singletonEvent
         /// и закрывает ТОЛЬКО его через DuplicateHandle(..., DUPLICATE_CLOSE_SOURCE), в точности как в Process Hacker / System Informer.
         /// </summary>
-        public static int CloseRobloxSingletonHandles()
+        public static int CloseRobloxSingletonHandles(int? excludePid = null)
         {
             var robloxProcs = Process.GetProcessesByName("RobloxPlayerBeta");
             if (robloxProcs.Length == 0)
@@ -127,7 +127,15 @@ namespace RobloxAccountManager.Services
             {
                 try
                 {
-                    targetPids.Add(p.Id);
+                    if (excludePid.HasValue && p.Id == excludePid.Value)
+                        continue;
+
+                    // Не закрываем singleton у только что стартовавшего процесса (< 65 МБ ОЗУ и без окна),
+                    // пока он проходит начальную распаковку / FlagFetchingStarterModule
+                    if (p.WorkingSet64 > 65L * 1024 * 1024 || p.MainWindowHandle != IntPtr.Zero)
+                    {
+                        targetPids.Add(p.Id);
+                    }
                 }
                 catch { }
                 finally

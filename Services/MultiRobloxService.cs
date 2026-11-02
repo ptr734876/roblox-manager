@@ -59,12 +59,12 @@ namespace RobloxAccountManager.Services
         /// Освобождает singleton перед запуском. Не завершает процессы Roblox по эвристике
         /// памяти/окна: такие проверки могут принять уже работающий клиент за tray-процесс.
         /// </summary>
-        public int PrepareForNewInstanceLaunch()
+        public int PrepareForNewInstanceLaunch(int? excludePid = null)
         {
             if (!IsEnabled)
                 return 0;
 
-            int closed = HandleCloser.CloseRobloxSingletonHandles();
+            int closed = HandleCloser.CloseRobloxSingletonHandles(excludePid);
             Interlocked.Add(ref _totalHandlesClosed, closed);
             return closed;
         }
