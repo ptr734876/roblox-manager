@@ -188,10 +188,22 @@ namespace RobloxAccountManager
             SaveCurrentConfig();
         }
 
+        private static readonly SavedPlace EmptySavedPlaceItem = new()
+        {
+            Name = "— Не выбрано —",
+            PlaceId = string.Empty,
+            VipLinkOrJobId = string.Empty
+        };
+
+        private bool _isUpdatingPlaceInputsFromCombo;
+
         private void RefreshSavedPlacesCombo()
         {
+            var items = new List<SavedPlace> { EmptySavedPlaceItem };
+            items.AddRange(_config.SavedPlaces);
             SavedPlacesCombo.ItemsSource = null;
-            SavedPlacesCombo.ItemsSource = _config.SavedPlaces;
+            SavedPlacesCombo.ItemsSource = items;
+            SavedPlacesCombo.SelectedItem = EmptySavedPlaceItem;
         }
 
         private void RefreshGroupFilterCombo()
@@ -1890,12 +1902,28 @@ namespace RobloxAccountManager
 
         private void SavedPlacesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isInitializing) return;
+            if (_isInitializing || _isUpdatingPlaceInputsFromCombo) return;
             if (SavedPlacesCombo.SelectedItem is SavedPlace place)
             {
-                PlaceInputTextBox.Text = place.PlaceId;
-                VipOrJobTextBox.Text = place.VipLinkOrJobId;
-                SaveCurrentConfig();
+                _isUpdatingPlaceInputsFromCombo = true;
+                try
+                {
+                    if (ReferenceEquals(place, EmptySavedPlaceItem))
+                    {
+                        PlaceInputTextBox.Text = string.Empty;
+                        VipOrJobTextBox.Text = string.Empty;
+                    }
+                    else
+                    {
+                        PlaceInputTextBox.Text = place.PlaceId;
+                        VipOrJobTextBox.Text = place.VipLinkOrJobId;
+                    }
+                    SaveCurrentConfig();
+                }
+                finally
+                {
+                    _isUpdatingPlaceInputsFromCombo = false;
+                }
             }
         }
 
@@ -1953,7 +1981,7 @@ namespace RobloxAccountManager
 
         private void DeleteSavedPlace_Click(object sender, RoutedEventArgs e)
         {
-            if (SavedPlacesCombo.SelectedItem is not SavedPlace place)
+            if (SavedPlacesCombo.SelectedItem is not SavedPlace place || ReferenceEquals(place, EmptySavedPlaceItem))
             {
                 FooterStatusText.Text = "Сначала выберите избранное для удаления.";
                 return;
@@ -2015,6 +2043,28 @@ namespace RobloxAccountManager
 
         private void PlaceInputTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
+            if (_isInitializing || _isUpdatingPlaceInputsFromCombo) return;
+
+            if (SavedPlacesCombo.SelectedItem is SavedPlace selected && !ReferenceEquals(selected, EmptySavedPlaceItem))
+            {
+                bool matchesSelected =
+                    string.Equals(PlaceInputTextBox.Text.Trim(), selected.PlaceId.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(VipOrJobTextBox.Text.Trim(), selected.VipLinkOrJobId.Trim(), StringComparison.OrdinalIgnoreCase);
+
+                if (!matchesSelected)
+                {
+                    _isUpdatingPlaceInputsFromCombo = true;
+                    try
+                    {
+                        SavedPlacesCombo.SelectedItem = EmptySavedPlaceItem;
+                    }
+                    finally
+                    {
+                        _isUpdatingPlaceInputsFromCombo = false;
+                    }
+                }
+            }
+
             SaveCurrentConfig();
         }
 

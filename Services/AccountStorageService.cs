@@ -46,6 +46,7 @@ namespace RobloxAccountManager.Services
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("RobloxAccountManager_DPAPI_Salt_v1");
         private readonly string _dataFolder;
         private readonly string _dataFilePath;
+        private readonly string _backupFilePath;
 
         public AccountStorageService()
         {
@@ -59,6 +60,7 @@ namespace RobloxAccountManager.Services
             }
 
             _dataFilePath = Path.Combine(_dataFolder, "accounts_data.json");
+            _backupFilePath = Path.Combine(_dataFolder, "accounts_data.bak.json");
         }
 
         public string DataFolder => _dataFolder;
@@ -92,43 +94,72 @@ namespace RobloxAccountManager.Services
 
         public AppConfigData Load()
         {
-            try
-            {
-                if (!File.Exists(_dataFilePath))
-                {
-                    return CreateDefaultConfig();
-                }
-
-                string json = File.ReadAllText(_dataFilePath, Encoding.UTF8);
-                var data = JsonSerializer.Deserialize<AppConfigData>(json);
-                if (data == null)
-                    return CreateDefaultConfig();
-
-                data.SavedPlaces ??= new List<SavedPlace>();
-                bool changed = data.SavedPlaces.RemoveAll(IsBuiltInSavedPlace) > 0;
-                if (!string.IsNullOrEmpty(data.LastPlaceInput) || !string.IsNullOrEmpty(data.LastVipOrJobInput))
-                {
-                    data.LastPlaceInput = string.Empty;
-                    data.LastVipOrJobInput = string.Empty;
-                    changed = true;
-                }
-
-                if (changed)
-                    Save(data);
-
-                return data;
-            }
-            catch
+            var data = TryReadConfigFile(_dataFilePath) ?? TryReadConfigFile(_backupFilePath);
+            if (data == null)
             {
                 return CreateDefaultConfig();
             }
+
+            data.Accounts ??= new List<RobloxAccount>();
+            data.SavedPlaces ??= new List<SavedPlace>();
+            bool changed = data.SavedPlaces.RemoveAll(IsBuiltInSavedPlace) > 0;
+            if (!string.IsNullOrEmpty(data.LastPlaceInput) || !string.IsNullOrEmpty(data.LastVipOrJobInput))
+            {
+                data.LastPlaceInput = string.Empty;
+                data.LastVipOrJobInput = string.Empty;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                try { Save(data); } catch { }
+            }
+
+            return data;
         }
 
+        private static AppConfigData? TryReadConfigFile(string path)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return null;
+
+                string json = File.ReadAllText(path, Encoding.UTF8);
+                if (string.IsNullOrWhiteSpace(json))
+                    return null;
+
+                return JsonSerializer.Deserialize<AppConfigData>(json);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsService.LogException("Storage.Load", ex, flushToDisk: false, customPrefix: Path.GetFileName(path));
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Атомарное сохранение конфигурации с созданием резервной копии (.bak.json),
+        /// чтобы ни при обновлении, ни при отключении питания настройки и куки никогда не повредились.
+        /// </summary>
         public void Save(AppConfigData data)
         {
             var options = new JsonSerializerOptions { WriteIndented = true };
             string json = JsonSerializer.Serialize(data, options);
-            File.WriteAllText(_dataFilePath, json, Encoding.UTF8);
+
+            string tempPath = _dataFilePath + ".tmp";
+            File.WriteAllText(tempPath, json, Encoding.UTF8);
+
+            if (File.Exists(_dataFilePath))
+            {
+                try
+                {
+                    File.Copy(_dataFilePath, _backupFilePath, overwrite: true);
+                }
+                catch { }
+            }
+
+            File.Move(tempPath, _dataFilePath, overwrite: true);
         }
 
         private static AppConfigData CreateDefaultConfig()
