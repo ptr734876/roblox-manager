@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -28,10 +28,12 @@ namespace RobloxAccountManager
         private readonly RobloxProcessResourceService _robloxProcessResourceService = new();
         private readonly PowerManagementService _powerManagementService = new();
         private readonly AntiAfkService _antiAfkService = new();
+        private readonly GitHubUpdateService _updateService = new();
         private readonly DispatcherTimer _antiAfkTimer = new() { Interval = TimeSpan.FromSeconds(15) };
         private DateTime _lastAntiAfkPulseUtc = DateTime.UtcNow;
         private readonly SemaphoreSlim _launchLock = new(1, 1);
         private DateTime _lastLaunchTime = DateTime.MinValue;
+        private GitHubReleaseInfo? _cachedAvailableUpdate;
 
         private AppConfigData _config = new();
         private readonly ObservableCollection<RobloxAccount> _filteredAccounts = new();
@@ -88,6 +90,9 @@ namespace RobloxAccountManager
 
             _isInitializing = false;
 
+            Version ver = GitHubUpdateService.GetCurrentVersion();
+            AppVersionText.Text = $"v{ver.Major}.{ver.Minor}.{ver.Build}";
+
             _processMonitorTimer.Interval = TimeSpan.FromSeconds(1.5);
             _processMonitorTimer.Tick += (_, _) =>
             {
@@ -95,13 +100,12 @@ namespace RobloxAccountManager
                 RobloxProcessResourceResult resourceResult =
                     _robloxProcessResourceService.UpdateBackgroundPriority(
                         _config.RobloxSettings?.LowerBackgroundProcessPriority == true);
-                string resourceStatus = resourceResult.ErrorCount > 0
-                    ? $" • Ошибок приоритета: {resourceResult.ErrorCount}"
-                    : resourceResult.LoweredBackgroundCount > 0
-                        ? $" • В фоне сниженный приоритет: {resourceResult.LoweredBackgroundCount}"
-                        : string.Empty;
-                RunningInstancesText.Text =
-                    $"Окон Roblox: {count} (закрыто singleton: {_multiRobloxService.TotalHandlesClosed}){resourceStatus}";
+                string resourceStatus = resourceResult.LoweredBackgroundCount > 0
+                    ? $" • Эко-фон: {resourceResult.LoweredBackgroundCount}"
+                    : string.Empty;
+                RunningInstancesText.Text = $"Окон: {count}{resourceStatus}";
+                int errCount = DiagnosticsService.ErrorCount;
+                ExportLogsBtn.Content = errCount > 0 ? $"📋 Лог ({errCount})" : "📋 Лог ошибок";
             };
             _processMonitorTimer.Start();
             AttachToExistingRobloxSessions();
@@ -112,16 +116,10 @@ namespace RobloxAccountManager
 
             int attachedCount = _sessions.Count;
             FooterStatusText.Text = attachedCount > 0
-                ? $"Загружено аккаунтов: {_config.Accounts.Count}. Подхвачено активных окон Roblox: {attachedCount}."
-                : $"Загружено аккаунтов: {_config.Accounts.Count}. Мульти-запуск готов.";
-            try
-            {
-                UpdateDesktopShortcut();
-            }
-            catch (Exception ex)
-            {
-                FooterStatusText.Text = $"Не удалось обновить ярлык рабочего стола: {ex.Message}";
-            }
+                ? $"Аккаунтов: {_config.Accounts.Count} • Подхвачено окон: {attachedCount}"
+                : $"Аккаунтов: {_config.Accounts.Count} • Готов к запуску";
+
+            _ = CheckForUpdatesSilentlyAsync();
         }
 
         private void MainWindow_Closed(object? sender, EventArgs e)
@@ -242,7 +240,7 @@ namespace RobloxAccountManager
         private void UpdateSelectionSummary()
         {
             int selectedCount = _config.Accounts.Count(account => account.IsSelected);
-            SelectionSummaryText.Text = $"Выбрано: {selectedCount} из {_config.Accounts.Count} аккаунтов";
+            SelectionSummaryText.Text = $"Выбрано: {selectedCount} / {_config.Accounts.Count}";
         }
 
         private void AddOrUpdateAccountFromLogin(string rawCookie, RobloxUserInfo userInfo, string group = "Основные", string note = "")
@@ -2045,6 +2043,122 @@ namespace RobloxAccountManager
         {
             if (_isInitializing) return;
             ApplyFilters();
+        }
+
+        private async Task CheckForUpdatesSilentlyAsync()
+        {
+            try
+            {
+                var (release, _) = await _updateService.CheckForUpdateAsync();
+                if (release != null && release.IsUpdateAvailable)
+                {
+                    _cachedAvailableUpdate = release;
+                    UpdateAppBtn.Content = $"⬇ Обновить ({release.TagName})";
+                    UpdateAppBtn.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2563EB"));
+                    UpdateAppBtn.Foreground = Brushes.White;
+                    FooterStatusText.Text = $"Доступна новая версия {release.TagName}! Нажмите «⬇ Обновить» внизу справа.";
+                }
+            }
+            catch { }
+        }
+
+        private async void UpdateApp_Click(object sender, RoutedEventArgs e)
+        {
+            UpdateAppBtn.IsEnabled = false;
+            try
+            {
+                FooterStatusText.Text = "Проверка обновлений на GitHub...";
+                var (release, error) = await _updateService.CheckForUpdateAsync();
+                if (release == null)
+                {
+                    MessageBox.Show(
+                        $"Не удалось проверить обновления: {error}",
+                        "Обновление",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    FooterStatusText.Text = $"Ошибка проверки обновлений: {error}";
+                    return;
+                }
+
+                Version currentVer = GitHubUpdateService.GetCurrentVersion();
+                if (!release.IsUpdateAvailable)
+                {
+                    var reinstallAsk = MessageBox.Show(
+                        $"У вас уже установлена актуальная версия (v{currentVer} / GitHub: {release.TagName}).\n\nПерекачать и обновить файлы принудительно?",
+                        "Обновление не требуется",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Information);
+                    if (reinstallAsk != MessageBoxResult.Yes)
+                    {
+                        FooterStatusText.Text = $"Установлена последняя версия ({release.TagName}).";
+                        return;
+                    }
+                }
+                else
+                {
+                    var confirm = MessageBox.Show(
+                        $"Доступна новая версия {release.TagName} (текущая: v{currentVer}).\n\nСкачать обновление с GitHub и перезапустить менеджер сейчас?\n(Уже открытые окна Roblox закрыты НЕ будут!)",
+                        "Доступно обновление",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+                    if (confirm != MessageBoxResult.Yes)
+                        return;
+                }
+
+                var (ok, msg) = await _updateService.DownloadAndApplyUpdateAsync(
+                    release,
+                    progress => Dispatcher.Invoke(() => FooterStatusText.Text = progress));
+
+                if (ok && msg == "RESTART_REQUIRED")
+                {
+                    FooterStatusText.Text = "Обновление скачано! Перезапуск...";
+                    Application.Current.Shutdown();
+                    return;
+                }
+
+                FooterStatusText.Text = msg;
+                if (!ok)
+                {
+                    MessageBox.Show(msg, "Ошибка обновления", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsService.LogError("UI.UpdateApp", "Сбой при обновлении", ex);
+                FooterStatusText.Text = $"Ошибка обновления: {ex.Message}";
+            }
+            finally
+            {
+                UpdateAppBtn.IsEnabled = true;
+            }
+        }
+
+        private void ExportErrorLog_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                int runningCount = _multiRobloxService.GetRunningRobloxCount();
+                string report = DiagnosticsService.ExportCompactReport(_config.Accounts.Count, runningCount);
+
+                var dlg = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = "Сохранить компактный лог ошибок",
+                    FileName = $"RobloxManager_Log_{DateTime.Now:yyyyMMdd_HHmmss}.txt",
+                    DefaultExt = ".txt",
+                    Filter = "Текстовый лог (*.txt)|*.txt|Все файлы (*.*)|*.*"
+                };
+
+                if (dlg.ShowDialog(this) == true)
+                {
+                    File.WriteAllText(dlg.FileName, report, System.Text.Encoding.UTF8);
+                    FooterStatusText.Text = $"Компактный лог сохранён: {Path.GetFileName(dlg.FileName)}";
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticsService.LogError("UI.ExportLog", "Не удалось экспортировать лог", ex);
+                MessageBox.Show($"Ошибка сохранения лога: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void CreateDesktopShortcut_Click(object sender, RoutedEventArgs e)

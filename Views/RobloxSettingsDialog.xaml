@@ -2,236 +2,206 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Настройки Roblox"
-        Width="520" Height="620"
-        MinWidth="420" MinHeight="300"
+        Width="470" Height="560"
+        MinWidth="400" MinHeight="320"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
-        Background="#12131A"
-        Foreground="#F8FAFC">
+        Background="#10121C"
+        Foreground="#F8FAFC"
+        ToolTipService.InitialShowDelay="250"
+        ToolTipService.ShowDuration="15000">
     <Window.Resources>
         <Style x:Key="SettingsSlider" TargetType="Slider">
             <Setter Property="Foreground" Value="#60A5FA"/>
-            <Setter Property="Margin" Value="0,10,0,0"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
             <Setter Property="IsSnapToTickEnabled" Value="True"/>
         </Style>
         <Style x:Key="SettingsCheckBox" TargetType="CheckBox">
             <Setter Property="Foreground" Value="#E2E8F0"/>
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
         </Style>
         <Style x:Key="SettingsNumberBox" TargetType="TextBox">
-            <Setter Property="Background" Value="#121521"/>
+            <Setter Property="Background" Value="#141827"/>
             <Setter Property="Foreground" Value="#F8FAFC"/>
-            <Setter Property="BorderBrush" Value="#2E3450"/>
+            <Setter Property="BorderBrush" Value="#2A304A"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Padding" Value="6,4"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Width" Value="72"/>
+            <Setter Property="Width" Value="68"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="Background" Value="#181C2B"/>
+            <Setter Property="BorderBrush" Value="#252B42"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel>
-            <TextBlock Text="Игровые настройки" FontSize="21" FontWeight="Bold"/>
-            <TextBlock Text="Общие значения для каждого следующего запуска Roblox."
-                       Foreground="#94A3B8" FontSize="12" Margin="0,5,0,0"/>
-        </StackPanel>
+        <DockPanel Margin="0,0,0,12">
+            <TextBlock Text="Настройки клиента" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+            <TextBlock Text="ⓘ Наведите на пункт для подсказки" Foreground="#64748B" FontSize="11"
+                       DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"
+                       ToolTip="Настройки графики и FPS безопасно сохраняются в GlobalBasicSettings_13.xml (когда окна Roblox закрыты). Таймауты применяются мгновенно."/>
+        </DockPanel>
 
-        <ScrollViewer Grid.Row="1" Margin="0,14,0,0"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
-                <Border Background="#1B1F30" BorderBrush="#2A2F47" BorderThickness="1"
-                        CornerRadius="9" Padding="16">
+                <!-- Графика -->
+                <Border Style="{StaticResource SectionCard}"
+                        ToolTip="Уровень качества графики в клиенте Roblox (1 — минимальная нагрузка на видеокарту, 10 — максимум).">
                     <StackPanel>
-                        <TextBlock Text="Графика" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                        <CheckBox x:Name="AutomaticGraphicsCheckBox" Content="Автоматический режим"
-                                  Style="{StaticResource SettingsCheckBox}"
-                                  Checked="GraphicsMode_Changed" Unchecked="GraphicsMode_Changed"/>
+                        <DockPanel>
+                            <TextBlock Text="Графика" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="AutomaticGraphicsCheckBox" Content="Авто"
+                                      Style="{StaticResource SettingsCheckBox}"
+                                      DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                      Checked="GraphicsMode_Changed" Unchecked="GraphicsMode_Changed"
+                                      ToolTip="Автоматический выбор качества графики самим клиентом Roblox"/>
+                        </DockPanel>
                         <TextBlock x:Name="GraphicsLevelLabel" Text="Уровень качества: 6"
-                                   Foreground="#CBD5E1" Margin="0,14,0,0"/>
+                                   Foreground="#94A3B8" FontSize="12" Margin="0,8,0,0"/>
                         <Slider x:Name="GraphicsQualitySlider" Style="{StaticResource SettingsSlider}"
                                 Minimum="1" Maximum="10" TickFrequency="1"
                                 ValueChanged="GraphicsQualitySlider_ValueChanged"/>
-                        <DockPanel Margin="0,5,0,0">
-                            <TextBlock Text="Ниже нагрузка" Foreground="#94A3B8" FontSize="11"/>
-                            <TextBlock Text="Выше качество" Foreground="#94A3B8" FontSize="11"
-                                       DockPanel.Dock="Right" HorizontalAlignment="Right"/>
-                        </DockPanel>
                     </StackPanel>
                 </Border>
 
-                <Border Background="#1B1F30" BorderBrush="#2A2F47" BorderThickness="1"
-                        CornerRadius="9" Padding="16" Margin="0,12,0,0">
+                <!-- Громкость и Чувствительность -->
+                <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <DockPanel>
-                            <TextBlock Text="Громкость" FontSize="15" FontWeight="SemiBold"/>
+                        <DockPanel ToolTip="Общая громкость звука во всех запускаемых окнах Roblox">
+                            <TextBlock Text="Громкость" FontSize="14" FontWeight="SemiBold"/>
                             <TextBlock x:Name="VolumeValueLabel" Text="100%" Foreground="#93C5FD"
                                        DockPanel.Dock="Right" HorizontalAlignment="Right"/>
                         </DockPanel>
                         <Slider x:Name="VolumeSlider" Style="{StaticResource SettingsSlider}"
                                 Minimum="0" Maximum="100" TickFrequency="1"
-                                ValueChanged="VolumeSlider_ValueChanged"/>
-                    </StackPanel>
-                </Border>
+                                ValueChanged="VolumeSlider_ValueChanged"
+                                ToolTip="Общая громкость звука в клиенте Roblox (0–100%)"/>
 
-                <Border Background="#1B1F30" BorderBrush="#2A2F47" BorderThickness="1"
-                        CornerRadius="9" Padding="16" Margin="0,12,0,0">
-                    <StackPanel>
-                        <DockPanel>
-                            <TextBlock Text="Чувствительность мыши" FontSize="15" FontWeight="SemiBold"/>
+                        <DockPanel Margin="0,12,0,0" ToolTip="Скорость поворота камеры мышью в игре">
+                            <TextBlock Text="Чувствительность мыши" FontSize="14" FontWeight="SemiBold"/>
                             <TextBlock x:Name="SensitivityValueLabel" Text="1,0" Foreground="#93C5FD"
                                        DockPanel.Dock="Right" HorizontalAlignment="Right"/>
                         </DockPanel>
                         <Slider x:Name="SensitivitySlider" Style="{StaticResource SettingsSlider}"
                                 Minimum="0" Maximum="4" TickFrequency="0.1"
-                                ValueChanged="SensitivitySlider_ValueChanged"/>
-                        <DockPanel Margin="0,5,0,0">
-                            <TextBlock Text="Медленно" Foreground="#94A3B8" FontSize="11"/>
-                            <TextBlock Text="Быстро" Foreground="#94A3B8" FontSize="11"
-                                       DockPanel.Dock="Right" HorizontalAlignment="Right"/>
-                        </DockPanel>
+                                ValueChanged="SensitivitySlider_ValueChanged"
+                                ToolTip="Чувствительность камеры в игре (стандартное значение — 1.0)"/>
                     </StackPanel>
                 </Border>
 
-                <Border Background="#1B1F30" BorderBrush="#2A2F47" BorderThickness="1"
-                        CornerRadius="9" Padding="16" Margin="0,12,0,0">
+                <!-- Ограничение FPS и Приоритет -->
+                <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <DockPanel>
-                            <TextBlock Text="Ограничение FPS" FontSize="15" FontWeight="SemiBold"/>
-                            <TextBlock Text="общее для клиентов" Foreground="#94A3B8"
-                                       FontSize="11" DockPanel.Dock="Right"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        </DockPanel>
-                        <ComboBox x:Name="FrameRateCapComboBox" SelectedValuePath="Tag"
-                                  Padding="8,6" FontSize="13" Margin="0,10,0,0">
-                            <ComboBoxItem Content="Стандартное значение Roblox" Tag="-1"/>
-                            <ComboBoxItem Content="15 FPS" Tag="15"/>
-                            <ComboBoxItem Content="30 FPS" Tag="30"/>
-                            <ComboBoxItem Content="60 FPS" Tag="60"/>
-                            <ComboBoxItem Content="120 FPS" Tag="120"/>
-                            <ComboBoxItem Content="144 FPS" Tag="144"/>
-                            <ComboBoxItem Content="240 FPS" Tag="240"/>
-                        </ComboBox>
-                        <TextBlock TextWrapping="Wrap" Foreground="#94A3B8" FontSize="11"
-                                   Margin="0,7,0,0"
-                                   Text="Снижение лимита обычно уменьшает нагрузку GPU и энергопотребление."/>
-                    </StackPanel>
-                </Border>
+                        <Grid ToolTip="Ограничение частоты кадров (снижение до 15–30 FPS сильно экономит видеокарту и батарею при мульти-окнах)">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="170"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Лимит FPS" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="1" x:Name="FrameRateCapComboBox" SelectedValuePath="Tag"
+                                      Padding="8,5" FontSize="13">
+                                <ComboBoxItem Content="По умолчанию" Tag="-1"/>
+                                <ComboBoxItem Content="15 FPS" Tag="15"/>
+                                <ComboBoxItem Content="30 FPS" Tag="30"/>
+                                <ComboBoxItem Content="60 FPS" Tag="60"/>
+                                <ComboBoxItem Content="120 FPS" Tag="120"/>
+                                <ComboBoxItem Content="144 FPS" Tag="144"/>
+                                <ComboBoxItem Content="240 FPS" Tag="240"/>
+                            </ComboBox>
+                        </Grid>
 
-                <Border Background="#1B1F30" BorderBrush="#2A2F47" BorderThickness="1"
-                        CornerRadius="9" Padding="16" Margin="0,12,0,0">
-                    <StackPanel>
-                        <TextBlock Text="Снижение нагрузки" FontSize="15" FontWeight="SemiBold"/>
                         <CheckBox x:Name="LowerBackgroundPriorityCheckBox"
-                                  Content="Снижать приоритет фоновых окон Roblox"
+                                  Content="Снижать CPU-приоритет фоновых окон"
                                   Style="{StaticResource SettingsCheckBox}"
-                                  Margin="0,12,0,0"/>
-                        <TextBlock TextWrapping="Wrap" Foreground="#94A3B8" FontSize="11"
-                                   Margin="0,7,0,0"
-                                   Text="Когда окно Roblox не активно, Windows будет отдавать ему меньше CPU-времени. Для активного окна исходный приоритет сохраняется. Работает, пока открыт менеджер; при закрытии приоритеты восстанавливаются."/>
+                                  Margin="0,12,0,0"
+                                  ToolTip="Переводит неактивные окна Roblox на приоритет BelowNormal, снижая нагрев и нагрузку на процессор. Активное окно сохраняет обычный приоритет."/>
                     </StackPanel>
                 </Border>
 
-                <Border Background="#1B1F30" BorderBrush="#2A2F47" BorderThickness="1"
-                        CornerRadius="9" Padding="16" Margin="0,12,0,0">
+                <!-- Таймауты -->
+                <Border Style="{StaticResource SectionCard}" Margin="0">
                     <StackPanel>
-                        <DockPanel>
-                            <TextBlock Text="Таймауты запуска и авто-реконнекта" FontSize="15" FontWeight="SemiBold"/>
-                            <Button Content="По умолчанию" Click="ResetTimeoutsBtn_Click"
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock Text="Таймауты и интервалы" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button Content="Сбросить" Click="ResetTimeoutsBtn_Click"
                                     Background="#252B42" Foreground="#93C5FD" BorderThickness="0"
                                     Padding="8,3" FontSize="11" Cursor="Hand"
-                                    DockPanel.Dock="Right" HorizontalAlignment="Right"/>
+                                    DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                    ToolTip="Вернуть стандартные значения таймаутов (210 / 180 / 150 / 20 сек и 12 мин)"/>
                         </DockPanel>
-                        <TextBlock TextWrapping="Wrap" Foreground="#94A3B8" FontSize="11" Margin="0,4,0,10"
-                                   Text="Применяются сразу ко всем окнам (не требуют закрытия Roblox). Если ноутбук долго открывает или перезапускает окна, увеличьте эти значения."/>
 
-                        <Grid Margin="0,4,0,0">
+                        <Grid Margin="0,4,0,0" ToolTip="Сколько секунд ждать появления и загрузки окна Roblox при старте до ошибки таймаута (по умолчанию: 210 сек)">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock Text="Ожидание открытия окна (сек):" Foreground="#E2E8F0" FontSize="13"/>
-                                <TextBlock Text="Сколько ждать запуска клиента до ошибки таймаута (по умолч. 210)" Foreground="#94A3B8" FontSize="11"/>
-                            </StackPanel>
+                            <TextBlock Text="Ожидание запуска окна (сек)" Foreground="#CBD5E1" FontSize="13" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="LaunchTimeoutBox" Style="{StaticResource SettingsNumberBox}" Text="210"/>
                         </Grid>
 
-                        <Grid Margin="0,10,0,0">
+                        <Grid Margin="0,8,0,0" ToolTip="Иммунитет после запуска: сколько секунд не считать перезапуск/загрузку дисконнектом (по умолчанию: 180 сек)">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock Text="Стартовый иммунитет после запуска (сек):" Foreground="#E2E8F0" FontSize="13"/>
-                                <TextBlock Text="Не считать закрытие/перезапуск дисконнектом при входе (по умолч. 180)" Foreground="#94A3B8" FontSize="11"/>
-                            </StackPanel>
+                            <TextBlock Text="Иммунитет при входе (сек)" Foreground="#CBD5E1" FontSize="13" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="StartupGraceBox" Style="{StaticResource SettingsNumberBox}" Text="180"/>
                         </Grid>
 
-                        <Grid Margin="0,10,0,0">
+                        <Grid Margin="0,8,0,0" ToolTip="Сколько секунд ждать завершения внутриигрового телепорта между серверами без вмешательства авто-реконнекта (по умолчанию: 150 сек)">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock Text="Защита внутриигрового телепорта (сек):" Foreground="#E2E8F0" FontSize="13"/>
-                                <TextBlock Text="Сколько ждать авто-реконнект внутри самой игры (по умолч. 150)" Foreground="#94A3B8" FontSize="11"/>
-                            </StackPanel>
+                            <TextBlock Text="Защита телепорта в игре (сек)" Foreground="#CBD5E1" FontSize="13" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="TeleportProtectionBox" Style="{StaticResource SettingsNumberBox}" Text="150"/>
                         </Grid>
 
-                        <Grid Margin="0,10,0,0">
+                        <Grid Margin="0,8,0,0" ToolTip="Пауза после ошибки соединения (Error 277 и др.) перед закрытием окна и перезаходом (по умолчанию: 20 сек)">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock Text="Подтверждение дисконнекта перед перезаходом (сек):" Foreground="#E2E8F0" FontSize="13"/>
-                                <TextBlock Text="Пауза после Error 277 перед закрытием окна (по умолч. 20)" Foreground="#94A3B8" FontSize="11"/>
-                            </StackPanel>
+                            <TextBlock Text="Пауза перед реконнектом (сек)" Foreground="#CBD5E1" FontSize="13" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="DisconnectConfirmBox" Style="{StaticResource SettingsNumberBox}" Text="20"/>
                         </Grid>
 
-                        <Grid Margin="0,10,0,0">
+                        <Grid Margin="0,8,0,0" ToolTip="Как часто отправлять безопасное нажатие Right Ctrl во все окна Roblox для сброса 20-минутного таймера бездействия (по умолчанию: 12 мин)">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock Text="Интервал Анти-АФК импульса (мин):" Foreground="#E2E8F0" FontSize="13"/>
-                                <TextBlock Text="Как часто сбрасывать 20-мин таймер бездействия Roblox (по умолч. 12)" Foreground="#94A3B8" FontSize="11"/>
-                            </StackPanel>
+                            <TextBlock Text="Интервал Анти-АФК (мин)" Foreground="#CBD5E1" FontSize="13" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="AntiAfkIntervalBox" Style="{StaticResource SettingsNumberBox}" Text="12"/>
                         </Grid>
                     </StackPanel>
                 </Border>
-
-                <Border Background="#292316" BorderBrush="#66501F" BorderThickness="1"
-                        CornerRadius="8" Padding="12" Margin="0,12,0,0">
-                    <TextBlock TextWrapping="Wrap" Foreground="#FDE68A" FontSize="11"
-                               Text="FPS и остальные параметры записываются в локальный файл пользовательских настроек Roblox (без FFlags и внедрения в процесс). Для безопасности настройки записываются только когда Roblox закрыт; при открытом клиенте запуск продолжится с уже сохранёнными значениями. Roblox может перезаписать настройки при завершении."/>
-                </Border>
             </StackPanel>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
             <Button Content="Отмена" Click="CancelBtn_Click"
-                    Background="#2A2D3E" Foreground="#CBD5E1" BorderThickness="0"
-                    Padding="16,9" Margin="0,0,10,0" Cursor="Hand"/>
-            <Button Content="Сохранить настройки" Click="SaveBtn_Click"
+                    Background="#232738" Foreground="#CBD5E1" BorderThickness="0"
+                    Padding="15,8" Margin="0,0,8,0" Cursor="Hand"/>
+            <Button Content="Сохранить" Click="SaveBtn_Click"
                     Background="#3B82F6" Foreground="White" BorderThickness="0"
-                    Padding="18,9" FontWeight="SemiBold" Cursor="Hand"/>
+                    Padding="18,8" FontWeight="SemiBold" Cursor="Hand"/>
         </StackPanel>
     </Grid>
 </Window>

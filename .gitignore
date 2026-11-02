@@ -27,7 +27,7 @@ dist/
 project.lock.json
 project.fragment.lock.json
 
-# Personal data, cookies, sessions & configs (NEVER COMMIT)
+# Personal data, cookies, sessions, logs & configs (NEVER COMMIT)
 accounts_data.json
 *accounts_data*.json
 RobloxCookies.dat
@@ -38,3 +38,6 @@ RobloxCookies.dat
 WebView2_Session/
 EBWebView/
 *.dat
+*.log
+*RobloxManager_Log*.txt
+*.update.exe
